@@ -19,9 +19,10 @@ class SuperDecryptJs {
   }
 
   jsjiami() {
-
-    let errorData = [],
+    let startTime = Date.now(),
+      errorData = [],
       encryptJsIndex, encryptJsSplit;
+
     [encryptJsIndex, encryptJsSplit] = this._findEncryptJsIndex()
 
     let encryptJs = this.sourceJs.substring(encryptJsIndex, this.sourceJs.length).trim(),
@@ -29,15 +30,11 @@ class SuperDecryptJs {
       encryptFuncJs = encryptJs.substring(0, encryptFuncJsIndex).trim(),
       encryptDataJs = encryptJs.substring(encryptFuncJsIndex).trim(),
       encryptArrJs = this.sourceJs.substring(0, encryptJsIndex),
-      encryptArrName = this._match(/,\s+([_]+0x[a-z0-9]+)\s+=\s+/, encryptArrJs),
       encryptFuncName = this._match(/var\s+([_]+0x[a-z0-9]+)\s+=/, encryptFuncJs),
-      encryptFunc = eval('(function(){' + encryptArrJs + ';' + encryptFuncJs + '; return ' + encryptFuncName + '})()'),
-      encryptArray = eval('(function(){' + encryptArrJs + '; return ' + encryptArrName + '})()');
+      encryptFunc = this._strObjJs(encryptFuncName, encryptArrJs, encryptFuncJs);
 
     // 全局替换
     encryptDataJs = this._decryptStr(encryptDataJs, encryptFuncName, encryptFunc);
-
-    this.write('q4.txt', encryptDataJs)
 
     // 局部替换
     let encryptPartArrMap = {};
@@ -48,7 +45,7 @@ class SuperDecryptJs {
         encryptPartArr = this._strObjJs(encryptPartArrName, encryptPartArrJs);
       } catch (error) {
         // 单字符匹配
-        let encryptPartArrCharJs = this._matchObjJs(encryptDataJs, `var ${encryptPartArrName}`);
+        let encryptPartArrCharJs = this._matchObjJsStr(encryptDataJs, `var ${encryptPartArrName}`);
         try {
           encryptPartArr = this._strObjJs(encryptPartArrName, encryptPartArrCharJs);
         } catch (e) {
@@ -58,10 +55,6 @@ class SuperDecryptJs {
             'js': encryptPartArrCharJs,
             'error': e.message
           }));
-
-          console.error('match char error ------->',
-            encryptPartArrCharJs, "\n",
-            e.message);
 
           return;
         }
@@ -78,29 +71,18 @@ class SuperDecryptJs {
 
     // 转对象调用
     encryptDataJs = encryptDataJs.replace(/([a-z0-9\-_A-Z)\]]+)\s?\[["']([^"']+)["']\]/g, '$1.$2');
-    // 字符替换
+    // 字符转义
     encryptDataJs = encryptDataJs.replace('\\x20', ' ');
 
     this.write('qcc_decrypt.js', encryptDataJs);
 
     if (errorData) {
-      this.write('decrypt_error.txt', errorData.join("\n"));
+      this.write(`decrypt_error-${startTime}.txt`, errorData.join("\n"));
     }
 
-    console.log("success");
-  }
+    console.log("decrypt completed. use time: %fs", (Date.now() - startTime) / 1000);
 
-  _addQutoForString(value, split) {
-    if (typeof value == 'string') {
-      if (value.indexOf("'") !== -1 && value.indexOf('"') !== -1) {
-        console.log(value, split);
-        value = value.replace(/'/g, "\\'");
-      } else if (value.indexOf("'") !== -1) {
-        return '"' + value + '"';
-      }
-    }
-
-    return "'" + value + "'";
+    return encryptDataJs;
   }
 
   _findEncryptJsIndex() {
@@ -118,6 +100,7 @@ class SuperDecryptJs {
     throw 'Cannot Found function.'
   }
 
+  // 正则匹配
   _match(pattern, string) {
     const p = new RegExp(pattern);
 
@@ -126,7 +109,8 @@ class SuperDecryptJs {
     return result ? result[1] : null;
   }
 
-  _matchObjJs(encryptDataJs, start) {
+  // 匹配js
+  _matchObjJsStr(encryptDataJs, start) {
 
     let encryptPartArr = [],
       charPair = {},
@@ -162,6 +146,7 @@ class SuperDecryptJs {
     return encryptPartArr.join('');
   }
 
+  // 字符串转对象
   _strObjJs(name, ...jsStrs) {
     return eval(`(function(){${jsStrs.join('; ')}; return ${name};})()`);
   }
@@ -172,32 +157,28 @@ class SuperDecryptJs {
     if (isFunction) {
       pattern = `${encryptFuncNmae}\\('(.[^']{1,10})',\\s*'(.[^']{1,10})'\\)`;
     } else {
-      pattern = `${encryptFuncNmae}\\['(.[^']{1,20})'\\]`; //  _0x3ee1ce['Xehre']
+      pattern = `${encryptFuncNmae}\\['(.[^']{1,20})'\\]`;
     }
-    // console.log(pattern)
 
     return encryptJs.replace(new RegExp(pattern, 'g'), (str, id, key) => {
-      let value;
-      if (isFunction) {
-        value = obj(id, key);
-      } else {
-        value = obj[id];
-      }
+      let value = isFunction ? obj(id, key) : obj[id];
 
       // 函数
-      if (/function.*?\{.*?\}/.exec(value)) {
+      if (/function.*?\{.*?\}/.test(value)) {
         return value;
       }
 
-      // 金额数字
+      // 数字金额
       if (/((^[1-9]\d*)|^0)(\.\d{1,2}){0,1}$/.test(value)) {
         return eval(`(function(){return ${value}})()`);
       }
 
+      // 引号转义
       if (value.indexOf("'") !== -1 && value.indexOf('"') !== -1) {
         value = value.replace(/'/g, "\\'");
       }
 
+      // 字符转义
       try {
         value = eval(`(function(){return '${value}'})()`)
       } catch (e) {}
@@ -206,6 +187,7 @@ class SuperDecryptJs {
         return "'" + value + "'";
       }
 
+      // 超长字符使用模板字符串
       return '`' + value + '`';
     });
   }
@@ -214,3 +196,12 @@ class SuperDecryptJs {
     return str.replace(pattern, cb);
   }
 }
+
+// demo
+const argvs = process.argv.splice(2)
+
+filename = argvs[0] || 'source.txt';
+
+const d = new SuperDecryptJs(filename)
+
+d.jsjiami()
